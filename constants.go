@@ -50,9 +50,3 @@ const (
 	// Requires UrlPattern (supports * wildcard); Milliseconds optional.
 	ActionTypeWaitForRequestCompletion = "waitForRequestCompletion"
 )
-
-// Proxy types for ScrapeRequestDto.Proxy (defaults to residential when empty)
-const (
-	ProxyResidential = "residential"
-	ProxyDatacenter  = "datacenter"
-)

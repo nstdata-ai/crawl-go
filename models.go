@@ -16,7 +16,6 @@ type ScrapeRequestDto struct {
 	JsRender        *JsRenderDto      `json:"jsRender,omitempty"`        // JavaScript rendering instructions
 	Mobile          bool              `json:"mobile,omitempty"`          // Whether to emulate a mobile device
 	OnlyMainContent bool              `json:"onlyMainContent,omitempty"` // Automatically extract main article content and remove noise
-	Proxy           string            `json:"proxy,omitempty"`           // Proxy type (e.g., datacenter, residential)
 	RemoveSelectors []string          `json:"removeSelectors,omitempty"` // CSS selectors for elements to remove (e.g., [".ads", "#popup"])
 	TargetSelector  string            `json:"targetSelector,omitempty"`  // CSS selector to restrict extraction to a specific element
 	Timeout         float64           `json:"timeout,omitempty"`         // Request timeout in milliseconds
@@ -40,7 +39,6 @@ type CrawlRequestDto struct {
 	MaxPages        int               `json:"maxPages,omitempty"`        // Maximum number of pages to crawl
 	Mobile          bool              `json:"mobile,omitempty"`          // Whether to emulate a mobile device
 	OnlyMainContent bool              `json:"onlyMainContent,omitempty"` // Automatically extract main article content
-	Proxy           string            `json:"proxy,omitempty"`           // Proxy type
 	RemoveSelectors []string          `json:"removeSelectors,omitempty"` // CSS selectors for elements to remove
 	TargetSelector  string            `json:"targetSelector,omitempty"`  // CSS selector to restrict extraction
 	Timeout         float64           `json:"timeout,omitempty"`         // Request timeout in milliseconds

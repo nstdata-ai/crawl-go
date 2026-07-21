@@ -23,7 +23,7 @@ func main() {
 	//exampleBrowserActions(ctx, client)
 	//exampleCookiesAndHeaders(ctx, client)
 	//exampleContentFilter(ctx, client)
-	//exampleProxyAndCountry(ctx, client)
+	//exampleCountry(ctx, client)
 	//exampleAsyncPolling(ctx, client)
 	//exampleLinksAndRawData(ctx, client)
 	//exampleCrawl(ctx, client)
@@ -141,12 +141,11 @@ func exampleContentFilter(ctx context.Context, client *crawl.Client) {
 	fmt.Println(md)
 }
 
-// Scenario 7: Specify proxy type and exit country
-func exampleProxyAndCountry(ctx context.Context, client *crawl.Client) {
+// Scenario 7: Specify proxy exit country
+func exampleCountry(ctx context.Context, client *crawl.Client) {
 	res, err := client.SubmitScrapeTaskSync(ctx, &crawl.ScrapeRequestDto{
 		URL:     "https://example.com/",
 		Formats: []string{crawl.FormatMarkdown},
-		Proxy:   crawl.ProxyDatacenter, // ProxyResidential can also be used (default)
 		Country: "us",
 		Timeout: 60000,
 	})
@@ -214,7 +213,6 @@ func exampleCrawl(ctx context.Context, client *crawl.Client) {
 		IgnoreQuery:     true, // Ignore URL query parameters when expanding links to avoid duplicate pages
 		Formats:         []string{crawl.FormatMarkdown},
 		OnlyMainContent: true,
-		Proxy:           crawl.ProxyResidential,
 		Timeout:         60000,
 	})
 	if err != nil {
