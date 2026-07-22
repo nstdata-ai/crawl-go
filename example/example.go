@@ -146,7 +146,7 @@ func exampleCountry(ctx context.Context, client *crawl.Client) {
 	res, err := client.SubmitScrapeTaskSync(ctx, &crawl.ScrapeRequestDto{
 		URL:     "https://example.com/",
 		Formats: []string{crawl.FormatMarkdown},
-		Country: "us",
+		Proxy:   &crawl.ProxyDto{Country: "us"},
 		Timeout: 60000,
 	})
 	if err != nil {

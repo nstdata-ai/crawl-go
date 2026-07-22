@@ -17,8 +17,8 @@ go get github.com/nstdata-ai/crawl-go
 - **Browser Actions:** Orchestrate browser actions like wait for elements, fill forms, click buttons, scroll, and execute JS.
 - **Custom Configuration:** Bring your own cookies, headers, and simulate mobile devices.
 - **Content Filtering:** Automatically extract high-quality main content, filter out ads and navigational elements.
-- **Proxy Location:** Specify proxy exit country.
-- **Asynchronous Execution & Polling:** Submit time-consuming tasks and poll for results.
+- **Proxy Location:** Specify proxy exit country with `Proxy.Country`.
+- **Synchronous or Asynchronous Scraping:** Use the same scrape API; asynchronous submission returns a task ID for polling.
 - **Batch Crawling:** Traverse entire sites with depth and page limits.
 
 ## Quick Start

@@ -8,7 +8,7 @@ import (
 type ScrapeRequestDto struct {
 	URL             string            `json:"url"`                       // The URL to scrape
 	Cookies         []CookieDto       `json:"cookies,omitempty"`         // Optional cookies to include in the request
-	Country         string            `json:"country,omitempty"`         // Country code for proxy location (e.g., 'us', 'gb')
+	Proxy           *ProxyDto         `json:"proxy,omitempty"`           // Proxy settings, such as exit country
 	ExcludeTags     []string          `json:"excludeTags,omitempty"`     // HTML tags to remove entirely (e.g., ["nav", "footer"])
 	Formats         []string          `json:"formats,omitempty"`         // Desired output formats (e.g., ["markdown", "html", "links"])
 	Headers         map[string]string `json:"headers,omitempty"`         // Custom HTTP headers
@@ -26,7 +26,7 @@ type ScrapeRequestDto struct {
 type CrawlRequestDto struct {
 	URL             string            `json:"url"`                       // The starting URL to crawl
 	Cookies         []CookieDto       `json:"cookies,omitempty"`         // Optional cookies to include in the request
-	Country         string            `json:"country,omitempty"`         // Country code for proxy location
+	Proxy           *ProxyDto         `json:"proxy,omitempty"`           // Proxy settings, such as exit country
 	ExcludeTags     []string          `json:"excludeTags,omitempty"`     // HTML tags to remove entirely
 	ExcludeUrls     []string          `json:"excludeUrls,omitempty"`     // Regex patterns to exclude specific URLs from crawling
 	Formats         []string          `json:"formats,omitempty"`         // Desired output formats (e.g., ["markdown", "html"])
@@ -51,6 +51,10 @@ type CookieDto struct {
 	Path     string `json:"path,omitempty"`     // Path for the cookie
 	Secure   bool   `json:"secure,omitempty"`   // True if the cookie requires HTTPS
 	Value    string `json:"value,omitempty"`    // Value of the cookie
+}
+
+type ProxyDto struct {
+	Country string `json:"country,omitempty"` // Proxy exit country code (e.g., "us", "gb")
 }
 
 type JsRenderDto struct {

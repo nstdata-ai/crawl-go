@@ -63,7 +63,11 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 			Msg  string          `json:"msg"`
 			Data json.RawMessage `json:"data"`
 		}
-		if err = json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		respBody, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return err
+		}
+		if err = json.Unmarshal(respBody, &apiResp); err != nil {
 			return err
 		}
 		if apiResp.Err || apiResp.Code != 200 {
@@ -86,7 +90,7 @@ func (c *Client) SubmitScrapeTask(ctx context.Context, req *ScrapeRequestDto) (*
 		return nil, fmt.Errorf("formats must contain at least one format")
 	}
 	var res SubmitResponseDto
-	if err := c.doRequest(ctx, http.MethodPost, "/api/v1/crawl/scrape/submit", req, &res); err != nil {
+	if err := c.doRequest(ctx, http.MethodPost, "/api/v1/crawl/scrape?async=true", req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -100,7 +104,7 @@ func (c *Client) SubmitScrapeTaskSync(ctx context.Context, req *ScrapeRequestDto
 		return nil, fmt.Errorf("formats must contain at least one format")
 	}
 	var res TaskResultResponseDto
-	if err := c.doRequest(ctx, http.MethodPost, "/api/v1/crawl/scrape/submit-sync", req, &res); err != nil {
+	if err := c.doRequest(ctx, http.MethodPost, "/api/v1/crawl/scrape", req, &res); err != nil {
 		return nil, err
 	}
 	if res.Data != nil {
@@ -117,7 +121,7 @@ func (c *Client) SubmitCrawlTask(ctx context.Context, req *CrawlRequestDto) (*Su
 		return nil, fmt.Errorf("formats must contain at least one format")
 	}
 	var res SubmitResponseDto
-	if err := c.doRequest(ctx, http.MethodPost, "/api/v1/crawl/submit", req, &res); err != nil {
+	if err := c.doRequest(ctx, http.MethodPost, "/api/v1/crawl", req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -125,14 +129,14 @@ func (c *Client) SubmitCrawlTask(ctx context.Context, req *CrawlRequestDto) (*Su
 
 func (c *Client) GetCrawlStatus(ctx context.Context, id string) (*CrawlStatusResponseDto, error) {
 	var res CrawlStatusResponseDto
-	if err := c.doRequest(ctx, http.MethodGet, "/api/v1/crawl/status/"+url.PathEscape(id), nil, &res); err != nil {
+	if err := c.doRequest(ctx, http.MethodGet, "/api/v1/crawl/"+url.PathEscape(id), nil, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
 }
 
 func (c *Client) ListCrawlPages(ctx context.Context, id string, opts ListCrawlPagesOptions) (*CrawlPageListResponseDto, error) {
-	u, _ := url.Parse("/api/v1/crawl/pages/" + url.PathEscape(id))
+	u, _ := url.Parse("/api/v1/crawl/" + url.PathEscape(id) + "/pages")
 	q := u.Query()
 	if opts.AfterCursor != "" {
 		q.Set("after_cursor", opts.AfterCursor)
@@ -159,7 +163,7 @@ func (c *Client) ListCrawlPages(ctx context.Context, id string, opts ListCrawlPa
 
 func (c *Client) GetScrapeTaskResult(ctx context.Context, id string) (*TaskResultResponseDto, error) {
 	var res TaskResultResponseDto
-	if err := c.doRequest(ctx, http.MethodGet, "/api/v1/crawl/scrape/result/"+url.PathEscape(id), nil, &res); err != nil {
+	if err := c.doRequest(ctx, http.MethodGet, "/api/v1/crawl/scrape/"+url.PathEscape(id), nil, &res); err != nil {
 		return nil, err
 	}
 	if res.Data != nil {
