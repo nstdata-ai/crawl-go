@@ -78,3 +78,53 @@ func TestExamplePollingStopsWhenContextIsCanceled(t *testing.T) {
 		t.Fatal("context did not stop continuation")
 	}
 }
+
+type failFirstWriter struct {
+	calls int
+	err   error
+}
+
+func (w *failFirstWriter) Write(p []byte) (int, error) {
+	w.calls++
+	if w.calls == 1 {
+		return 0, w.err
+	}
+	return len(p), nil
+}
+
+func TestPageOutputFailureStopsAndPreservesCause(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"code":200,"err":false,"data":{"data":[{"status":"completed","success":true,"data":{"markdown":"first"}},{"status":"completed","success":true,"data":{"markdown":"second"}}]}}`)
+	}))
+	defer server.Close()
+	client := crawl.NewClient("fixture-key")
+	client.BaseURL = server.URL
+	failure := errors.New("fixture output failure")
+	writer := &failFirstWriter{err: failure}
+	err := printPages(context.Background(), client, "existing", writer)
+	if !errors.Is(err, failure) || writer.calls != 1 {
+		t.Fatalf("output failure: %v writes=%d", err, writer.calls)
+	}
+}
+
+func TestPageCancellationStopsWithoutFailedPageOutput(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if strings.HasSuffix(r.URL.Path, "/read") {
+			cancel()
+			return
+		}
+		fmt.Fprint(w, `{"code":200,"err":false,"data":{"data":[{"status":"completed","success":true,"data":{"markdownRef":"opaque"}}]}}`)
+	}))
+	defer server.Close()
+	client := crawl.NewClient("fixture-key")
+	client.BaseURL = server.URL
+	var out bytes.Buffer
+	err := printPages(ctx, client, "existing", &out)
+	if !errors.Is(err, context.Canceled) || out.Len() != 0 || calls != 2 {
+		t.Fatalf("page cancellation: %v output=%q calls=%d", err, out.String(), calls)
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sync"
+	"unicode/utf8"
 )
 
 type ScrapeRequestDto struct {
@@ -19,7 +20,7 @@ type ScrapeRequestDto struct {
 	IncludeTags     []string          `json:"includeTags,omitempty"`     // Included tags; extraction behavior is service-defined
 	JsRender        *JsRenderDto      `json:"jsRender,omitempty"`        // JavaScript rendering instructions
 	Mobile          bool              `json:"mobile,omitempty"`          // Whether to emulate a mobile device
-	OnlyMainContent bool              `json:"onlyMainContent,omitempty"` // Automatically extract main article content and remove noise
+	OnlyMainContent bool              `json:"onlyMainContent"`           // Always sent; true requests main-content filtering.
 	RemoveSelectors []string          `json:"removeSelectors,omitempty"` // CSS selectors for elements to remove (e.g., [".ads", "#popup"])
 	TargetSelector  string            `json:"targetSelector,omitempty"`  // CSS selector to restrict extraction to a specific element
 	Timeout         float64           `json:"timeout,omitempty"`         // Optional integer milliseconds, 1000–60000; zero omits the setting
@@ -42,7 +43,7 @@ type CrawlRequestDto struct {
 	MaxDepth        int               `json:"maxDepth,omitempty"`        // Maximum depth of links to follow
 	MaxPages        int               `json:"maxPages,omitempty"`        // Maximum number of pages to crawl
 	Mobile          bool              `json:"mobile,omitempty"`          // Whether to emulate a mobile device
-	OnlyMainContent bool              `json:"onlyMainContent,omitempty"` // Automatically extract main article content
+	OnlyMainContent bool              `json:"onlyMainContent"`           // Always sent; true requests main-content filtering.
 	RemoveSelectors []string          `json:"removeSelectors,omitempty"` // CSS selectors for elements to remove
 	TargetSelector  string            `json:"targetSelector,omitempty"`  // CSS selector to restrict extraction
 	Timeout         float64           `json:"timeout,omitempty"`         // Optional integer milliseconds, 1000–60000; zero omits the setting
@@ -204,6 +205,9 @@ func (s *ScrapeDataDto) get(ctx context.Context, index int) ([]byte, error) {
 	value, err := client.ReadStorage(ctx, ref)
 	if err != nil {
 		return nil, err
+	}
+	if (index == 0 || index == 1) && !utf8.Valid(value) {
+		return nil, errors.New("crawl: text content must be valid UTF-8")
 	}
 	s.cache.mu.Lock()
 	s.cache.content[index] = append([]byte{}, value...)

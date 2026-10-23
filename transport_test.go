@@ -337,3 +337,122 @@ func TestExactResponseLimitAndNilHTTPClient(t *testing.T) {
 }
 
 var _ io.ReadCloser = (*failedBody)(nil)
+
+func TestInvalidUTF8APIResponsesAreRejected(t *testing.T) {
+	for _, operation := range []string{"sync", "query", "pages"} {
+		t.Run(operation, func(t *testing.T) {
+			calls := 0
+			client := crawl.NewClient("fixture-key")
+			client.HTTPClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				calls++
+				payload := `{"data":{"markdown":"private-` + string([]byte{0xff}) + `"}}`
+				if operation == "pages" {
+					payload = `{"data":[` + payload + `]}`
+				}
+				return response(`{"code":200,"err":false,"data":` + payload + `}`), nil
+			})}
+			var err error
+			switch operation {
+			case "sync":
+				_, err = client.SubmitScrapeTaskSync(context.Background(), &crawl.ScrapeRequestDto{URL: "https://target.invalid/", Formats: []string{"markdown"}})
+			case "query":
+				_, err = client.GetScrapeTaskResult(context.Background(), "existing")
+			case "pages":
+				_, err = client.ListCrawlPages(context.Background(), "existing", crawl.ListCrawlPagesOptions{})
+			}
+			if err == nil || strings.Contains(err.Error(), "private-") || calls != 1 {
+				t.Fatalf("invalid UTF-8: err=%v calls=%d", err, calls)
+			}
+		})
+	}
+}
+
+func TestTextReferencesRejectInvalidUTF8WithoutCaching(t *testing.T) {
+	for _, format := range []string{"html", "markdown"} {
+		t.Run(format, func(t *testing.T) {
+			client := crawl.NewClient("fixture-key")
+			reads := 0
+			client.HTTPClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				if strings.HasSuffix(r.URL.Path, "/read") {
+					reads++
+					if reads == 1 {
+						return response(string([]byte{0xff})), nil
+					}
+					return response("valid text"), nil
+				}
+				return response(`{"code":200,"err":false,"data":{"data":{"` + format + `Ref":"opaque"}}}`), nil
+			})}
+			result, err := client.GetScrapeTaskResult(context.Background(), "existing")
+			if err != nil {
+				t.Fatal(err)
+			}
+			read := result.Data.GetMarkdown
+			if format == "html" {
+				read = result.Data.GetHtml
+			}
+			text, err := read(context.Background())
+			if err == nil || text != "" || reads != 1 {
+				t.Fatalf("invalid text: %q %v reads=%d", text, err, reads)
+			}
+			text, err = read(context.Background())
+			if err != nil || text != "valid text" || reads != 2 {
+				t.Fatalf("later read: %q %v reads=%d", text, err, reads)
+			}
+			text, err = read(context.Background())
+			if err != nil || text != "valid text" || reads != 2 {
+				t.Fatalf("cache: %q %v reads=%d", text, err, reads)
+			}
+		})
+	}
+}
+
+func TestRawReferenceBytesRemainUnchanged(t *testing.T) {
+	client := crawl.NewClient("fixture-key")
+	client.HTTPClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(r.URL.Path, "/read") {
+			return response(string([]byte{0xff, 0x00, 0x80})), nil
+		}
+		return response(`{"code":200,"err":false,"data":{"data":{"rawDataRef":"opaque"}}}`), nil
+	})}
+	result, err := client.GetScrapeTaskResult(context.Background(), "existing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := result.Data.GetRawData(context.Background())
+	if err != nil || string(raw) != string([]byte{0xff, 0x00, 0x80}) {
+		t.Fatalf("raw bytes changed: %v %v", raw, err)
+	}
+}
+
+func TestMainContentBooleanIsSentExplicitly(t *testing.T) {
+	for _, value := range []bool{false, true} {
+		calls := 0
+		client := crawl.NewClient("fixture-key")
+		client.HTTPClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			calls++
+			var body map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			actual, present := body["onlyMainContent"]
+			if !present || actual != value {
+				t.Errorf("onlyMainContent: value=%v present=%v expected=%v", actual, present, value)
+			}
+			return response(`{"code":200,"err":false,"data":{}}`), nil
+		})}
+		ctx := context.Background()
+		scrape := &crawl.ScrapeRequestDto{URL: "https://target.invalid/", Formats: []string{"markdown"}, OnlyMainContent: value}
+		if _, err := client.SubmitScrapeTaskSync(ctx, scrape); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := client.SubmitScrapeTask(ctx, scrape); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := client.SubmitCrawlTask(ctx, &crawl.CrawlRequestDto{URL: scrape.URL, Formats: scrape.Formats, OnlyMainContent: value}); err != nil {
+			t.Fatal(err)
+		}
+		if calls != 3 {
+			t.Fatalf("unexpected requests: %d", calls)
+		}
+	}
+}

@@ -11,6 +11,8 @@ import (
 	crawl "github.com/nstdata-ai/crawl-go"
 )
 
+var errOutput = errors.New("content output failed")
+
 func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -123,7 +125,7 @@ func printContent(ctx context.Context, result *crawl.TaskResultResponseDto, out 
 		return err
 	}
 	if _, err := fmt.Fprintln(out, content); err != nil {
-		return err
+		return errors.Join(errOutput, err)
 	}
 	if result.Data.Truncated != nil && *result.Data.Truncated {
 		return errors.New("content is marked truncated; retain this partial result")
@@ -142,6 +144,9 @@ func printPages(ctx context.Context, client *crawl.Client, id string, out io.Wri
 		}
 		for _, page := range pages.Data {
 			if err := printContent(ctx, &crawl.TaskResultResponseDto{Status: page.Status, Success: page.Success, Data: page.Data}, out); err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errOutput) {
+					return err
+				}
 				failed = true
 				if _, writeErr := fmt.Fprintln(out, "Page unavailable, failed or partial; retain its task record."); writeErr != nil {
 					return writeErr

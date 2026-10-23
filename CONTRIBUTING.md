@@ -13,7 +13,7 @@ go test -race ./...
 go build ./...
 ```
 
-Tests use synthetic fixtures and loopback HTTP servers, without credentials or paid API calls. Cover changes through public client/results and the executable example: failures, absent/empty content, references, context, response limits and resource cleanup. README Go examples are compiled in isolated modules.
+Tests use synthetic fixtures and loopback HTTP servers, without credentials or paid API calls. Cover changes through public client/results and the executable example: failures, absent/empty content, references, context, response limits and resource cleanup. README Go examples compile in isolated consumer modules. Bilingual guide functions execute through the real client with synthetic responses; documentation checks verify local links and matching code. The module archive includes the guides and security reporting instructions.
 
 ## Local module consumption
 

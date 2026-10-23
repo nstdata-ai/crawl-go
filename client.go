@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const baseURL = "https://api.nstdata.io"
@@ -159,7 +160,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body, resul
 		Err  *bool           `json:"err"`
 		Data json.RawMessage `json:"data"`
 	}
-	if json.Unmarshal(data, &envelope) != nil || envelope.Code == nil || envelope.Err == nil {
+	if !utf8.Valid(data) || json.Unmarshal(data, &envelope) != nil || envelope.Code == nil || envelope.Err == nil {
 		return errors.New("crawl: invalid API response envelope")
 	}
 	if *envelope.Err || *envelope.Code != 200 {
