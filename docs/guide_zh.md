@@ -25,20 +25,28 @@
 以下函数复用快速开始中的客户端和有总期限的 context；导入 `context`、`fmt`，并将 SDK 导入为 `crawl`。
 
 ```go
-func submitAndInspect(ctx context.Context, client *crawl.Client, target string) (string, string, error) {
-    submitted, err := client.SubmitScrapeTask(ctx, &crawl.ScrapeRequestDto{
-        URL: target, Formats: []string{crawl.FormatMarkdown}, OnlyMainContent: true,
-    })
-    if err != nil { return "", "", err }
-    if submitted.Id == "" { return "", "", fmt.Errorf("submission returned no ID; investigate before resubmitting") }
-    id := submitted.Id // Persist this ID before further work.
-    result, err := client.GetScrapeTaskResult(ctx, id)
-    if err != nil { return id, "", err }
-    if result.Status != crawl.StatusCompleted || !result.Success || result.Data == nil {
-        return id, "", fmt.Errorf("task is %s; inspect or resume the saved ID", result.Status)
-    }
-    text, err := result.Data.GetMarkdown(ctx)
-    return id, text, err
+func submitAndInspect(
+	ctx context.Context, client *crawl.Client, target string,
+) (string, string, error) {
+	submitted, err := client.SubmitScrapeTask(ctx, &crawl.ScrapeRequestDto{
+		URL: target, Formats: []string{crawl.FormatMarkdown}, OnlyMainContent: true,
+	})
+	if err != nil {
+		return "", "", err
+	}
+	if submitted.Id == "" {
+		return "", "", fmt.Errorf("submission returned no ID; investigate before resubmitting")
+	}
+	id := submitted.Id // Persist this ID before further work.
+	result, err := client.GetScrapeTaskResult(ctx, id)
+	if err != nil {
+		return id, "", err
+	}
+	if result.Status != crawl.StatusCompleted || !result.Success || result.Data == nil {
+		return id, "", fmt.Errorf("task is %s; inspect or resume the saved ID", result.Status)
+	}
+	text, err := result.Data.GetMarkdown(ctx)
+	return id, text, err
 }
 ```
 
@@ -52,18 +60,24 @@ func submitAndInspect(ctx context.Context, client *crawl.Client, target string) 
 
 ```go
 func readBatch(ctx context.Context, client *crawl.Client, id, cursor string) (string, error) {
-    pages, err := client.ListCrawlPages(ctx, id, crawl.ListCrawlPagesOptions{
-        AfterCursor: cursor, Limit: 20,
-    })
-    if err != nil { return "", err }
-    for _, page := range pages.Data {
-        fmt.Println(page.Url, page.TaskId, page.Status, page.Success)
-        if page.Status != crawl.StatusCompleted || !page.Success || page.Data == nil { continue }
-        text, err := page.Data.GetMarkdown(ctx)
-        if err != nil { return "", err }
-        fmt.Println(text)
-    }
-    return pages.NextCursor, nil
+	pages, err := client.ListCrawlPages(ctx, id, crawl.ListCrawlPagesOptions{
+		AfterCursor: cursor, Limit: 20,
+	})
+	if err != nil {
+		return "", err
+	}
+	for _, page := range pages.Data {
+		fmt.Println(page.Url, page.TaskId, page.Status, page.Success)
+		if page.Status != crawl.StatusCompleted || !page.Success || page.Data == nil {
+			continue
+		}
+		text, err := page.Data.GetMarkdown(ctx)
+		if err != nil {
+			return "", err
+		}
+		fmt.Println(text)
+	}
+	return pages.NextCursor, nil
 }
 ```
 

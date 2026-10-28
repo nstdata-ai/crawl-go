@@ -18,47 +18,76 @@
 
 需要 Go 1.20+。生产环境使用[仍在维护的 Go 版本](https://go.dev/doc/devel/release#policy)。
 
+新项目先在应用目录中初始化一次；已有 `go.mod` 的项目跳过此步：
+
+```sh
+go mod init example.com/crawl-example
+```
+
+在应用的 Go 模块中安装 SDK：
+
 ```sh
 go get github.com/nstdata-ai/crawl-go@v1.0.0
 ```
 
-`v1.0.0` 尚未发布，本地安装见[贡献说明](CONTRIBUTING.md)。从 `v0.1.1` 升级请阅读[变更记录](CHANGELOG.md)，包括 `OnlyMainContent` 的显式序列化变化。
+从 `v0.1.1` 升级请阅读[变更记录](CHANGELOG.md#v100)，包括 `OnlyMainContent` 的显式序列化变化。
 
 ## 快速开始
 
-设置环境变量 `NSTDATA_API_TOKEN`。此例创建一个抓取任务，可能消耗额度。
+在环境中设置 API Key（macOS/Linux）：
+
+```sh
+export NSTDATA_API_TOKEN='your-api-key'
+```
+
+将以下程序保存为 `main.go`。它提交一次单页任务并输出 Markdown；服务调用会消耗额度。
 
 ```go
 package main
 
 import (
-    "context"
-    "fmt"
-    "log"
-    "os"
-    "time"
+	"context"
+	"fmt"
+	"log"
+	"os"
+	"time"
 
-    crawl "github.com/nstdata-ai/crawl-go"
+	crawl "github.com/nstdata-ai/crawl-go"
 )
 
 func main() {
-    ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-    defer cancel()
-    client := crawl.NewClient(os.Getenv("NSTDATA_API_TOKEN"))
-    result, err := client.SubmitScrapeTaskSync(ctx, &crawl.ScrapeRequestDto{
-        URL: "https://example.com/", Formats: []string{crawl.FormatMarkdown}, OnlyMainContent: true,
-    })
-    if err != nil { log.Fatal(err) }
-    if result.Status != crawl.StatusCompleted || !result.Success || result.Data == nil {
-        log.Fatal("task did not return successful completed content")
-    }
-    text, err := result.Data.GetMarkdown(ctx)
-    if err != nil { log.Fatal(err) }
-    fmt.Println(text)
-    if result.Data.Truncated != nil && *result.Data.Truncated {
-        log.Print("content is truncated")
-    }
+	token := os.Getenv("NSTDATA_API_TOKEN")
+	if token == "" {
+		log.Fatal("Set NSTDATA_API_TOKEN in your environment.")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	client := crawl.NewClient(token)
+	result, err := client.SubmitScrapeTaskSync(ctx, &crawl.ScrapeRequestDto{
+		URL: "https://example.com/", Formats: []string{crawl.FormatMarkdown},
+		OnlyMainContent: true,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	if result.Status != crawl.StatusCompleted || !result.Success || result.Data == nil {
+		log.Fatal("task did not return successful completed content")
+	}
+	text, err := result.Data.GetMarkdown(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(text)
+	if result.Data.Truncated != nil && *result.Data.Truncated {
+		log.Print("content is truncated")
+	}
 }
+```
+
+在同一个应用模块中运行：
+
+```sh
+go run .
 ```
 
 缺失正文返回 `ErrContentUnavailable`；存在但为空的正文读取成功。完整任务流程、方法输入／结果及失败处理见[使用指南](docs/guide_zh.md)。

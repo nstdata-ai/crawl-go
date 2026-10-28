@@ -115,6 +115,8 @@ func TestPageCancellationStopsWithoutFailedPageOutput(t *testing.T) {
 		calls++
 		if strings.HasSuffix(r.URL.Path, "/read") {
 			cancel()
+			// Keep the response pending until the client observes cancellation.
+			<-r.Context().Done()
 			return
 		}
 		fmt.Fprint(w, `{"code":200,"err":false,"data":{"data":[{"status":"completed","success":true,"data":{"markdownRef":"opaque"}}]}}`)

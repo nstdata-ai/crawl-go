@@ -7,17 +7,17 @@ Keep the public import path and existing methods compatible where possible. Reco
 Use Go 1.20.14 for the compatibility floor and a maintained Go release for production checks:
 
 ```sh
-gofmt -w *.go example/*.go
+gofmt -w *.go example/*.go internal/release/*.go
 go vet ./...
 go test -race ./...
 go build ./...
 ```
 
-Tests use synthetic fixtures and loopback HTTP servers, without credentials or paid API calls. Cover changes through public client/results and the executable example: failures, absent/empty content, references, context, response limits and resource cleanup. README Go examples compile in isolated consumer modules. Bilingual guide functions execute through the real client with synthetic responses; documentation checks verify local links and matching code. The module archive includes the guides and security reporting instructions.
+Tests use synthetic fixtures and loopback HTTP servers, without credentials or paid API calls. Cover changes through public client/results and the executable example: failures, absent/empty content, references, context, response limits and resource cleanup. README programs run in isolated consumers with test-only transport fixtures; the original program is preserved. Bilingual guide functions execute through the real client with synthetic responses. Documentation checks verify local links and matching code. The module archive includes the guides and security reporting instructions.
 
 ## Local module consumption
 
-Before the version is published, run these commands from a separate application directory, replacing the last argument with your checkout's path:
+To consume a local checkout, run these commands from a separate application directory, replacing the last argument with your checkout's path:
 
 ```sh
 go mod init example.com/crawl-consumer
@@ -41,4 +41,10 @@ go run ./example resume-crawl SAVED_CRAWL_ID
 
 These are independent alternatives. Submission can incur charges. Store the returned ID before continuing; do not resubmit after an uncertain outcome. The example caps status queries at 20, page batches at 100 and total waiting at two minutes. Site submission sets maxPages=2/maxDepth=1; native discovery can return fewer pages. Keep IDs, references, private content and local credentials out of published fixtures.
 
-Before a release, confirm license rights, version/tag, corresponding CI, artifact contents, maintained-runtime tests and representative service acceptance. After authorized publication, verify installation from the public module source without local replacement. Local checks do not establish release or deployed-service status.
+## Publishing
+
+Use the manually dispatched `Publish Go module` workflow from `main`, supplying the stable version tag and full reviewed commit SHA. After CI and approval in `go-production`, it creates that tag at the reviewed commit and verifies public module installation. The workflow does not move or replace an existing tag.
+
+Configure `go-production` with required reviewers, administrator bypass disabled and only the `main` branch allowed. The tag job uses the workflow's automatic GitHub token with `contents: write`; Go modules do not require a separate package-registry token.
+
+Public verification compares the source commit, Go module checksums and installed source bytes. Compressed ZIP bytes and module-info timestamps can differ between distribution paths. Check failures against the actual tag and public module state before another run; never force-push a released tag. Tag creation and publication require explicit authorization.

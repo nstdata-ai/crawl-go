@@ -18,47 +18,76 @@ Retrieve webpage content through Nstdata Crawl using a context-aware Go client. 
 
 Requires Go 1.20+. Use a [maintained Go release](https://go.dev/doc/devel/release#policy) in production.
 
+For a new application, run this once in its directory. Skip it if the project already has `go.mod`:
+
+```sh
+go mod init example.com/crawl-example
+```
+
+Install the SDK in your application module:
+
 ```sh
 go get github.com/nstdata-ai/crawl-go@v1.0.0
 ```
 
-`v1.0.0` is not published yet. For local installation, see [Contributing](CONTRIBUTING.md). When upgrading from `v0.1.1`, review the [changes](CHANGELOG.md), including explicit `OnlyMainContent` serialization.
+When upgrading from `v0.1.1`, review the [changes](CHANGELOG.md#v100), including explicit `OnlyMainContent` serialization.
 
 ## Quick start
 
-Set `NSTDATA_API_TOKEN`. This example creates one scrape task and may consume credits.
+Set your API key in the environment (macOS/Linux):
+
+```sh
+export NSTDATA_API_TOKEN='your-api-key'
+```
+
+Save the following as `main.go`. It submits one scrape task and prints Markdown; service calls consume credits.
 
 ```go
 package main
 
 import (
-    "context"
-    "fmt"
-    "log"
-    "os"
-    "time"
+	"context"
+	"fmt"
+	"log"
+	"os"
+	"time"
 
-    crawl "github.com/nstdata-ai/crawl-go"
+	crawl "github.com/nstdata-ai/crawl-go"
 )
 
 func main() {
-    ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-    defer cancel()
-    client := crawl.NewClient(os.Getenv("NSTDATA_API_TOKEN"))
-    result, err := client.SubmitScrapeTaskSync(ctx, &crawl.ScrapeRequestDto{
-        URL: "https://example.com/", Formats: []string{crawl.FormatMarkdown}, OnlyMainContent: true,
-    })
-    if err != nil { log.Fatal(err) }
-    if result.Status != crawl.StatusCompleted || !result.Success || result.Data == nil {
-        log.Fatal("task did not return successful completed content")
-    }
-    text, err := result.Data.GetMarkdown(ctx)
-    if err != nil { log.Fatal(err) }
-    fmt.Println(text)
-    if result.Data.Truncated != nil && *result.Data.Truncated {
-        log.Print("content is truncated")
-    }
+	token := os.Getenv("NSTDATA_API_TOKEN")
+	if token == "" {
+		log.Fatal("Set NSTDATA_API_TOKEN in your environment.")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	client := crawl.NewClient(token)
+	result, err := client.SubmitScrapeTaskSync(ctx, &crawl.ScrapeRequestDto{
+		URL: "https://example.com/", Formats: []string{crawl.FormatMarkdown},
+		OnlyMainContent: true,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	if result.Status != crawl.StatusCompleted || !result.Success || result.Data == nil {
+		log.Fatal("task did not return successful completed content")
+	}
+	text, err := result.Data.GetMarkdown(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(text)
+	if result.Data.Truncated != nil && *result.Data.Truncated {
+		log.Print("content is truncated")
+	}
 }
+```
+
+Run it from the same application module:
+
+```sh
+go run .
 ```
 
 Missing content returns `ErrContentUnavailable`; present empty content succeeds. For complete task flows, method inputs/results and error handling, see the [usage guide](docs/guide.md).

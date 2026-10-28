@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — v1.0.0
+## v1.0.0
 
 - Use the Nstdata API origin by default; add configurable API origin and per-response byte limit.
 - Validate nil requests, integer timing/action fields, task IDs, cursor options and API envelopes.
