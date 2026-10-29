@@ -1,29 +1,46 @@
-# nstdata crawl SDK (Golang)
+# Nstdata Crawl SDK for Go
 
-[中文版](README_zh.md)
+[中文](README_zh.md)
 
-Golang SDK for nstdata crawl, an advanced web scraping and crawling service.
-
-## Installation
-
-```bash
-go get github.com/nstdata-ai/crawl-go
-```
+Retrieve webpage content through Nstdata Crawl using a context-aware Go client. No third-party runtime dependencies.
 
 ## Features
 
-- **Basic Scraping:** Get HTML and Markdown synchronously.
-- **Screenshots & PDFs:** Take full-page screenshots and export pages as PDFs.
-- **Browser Actions:** Orchestrate browser actions like wait for elements, fill forms, click buttons, scroll, and execute JS.
-- **Custom Configuration:** Bring your own cookies, headers, and simulate mobile devices.
-- **Content Filtering:** Automatically extract high-quality main content, filter out ads and navigational elements.
-- **Proxy Location:** Specify proxy exit country with `Proxy.Country`.
-- **Synchronous or Asynchronous Scraping:** Use the same scrape API; asynchronous submission returns a task ID for polling.
-- **Batch Crawling:** Traverse entire sites with depth and page limits.
+| Capability | Guide |
+|---|---|
+| Single-page scraping | Read Markdown, HTML, links, PDF, screenshots or raw bytes. |
+| Asynchronous tasks | [Submit once and continue with the saved ID](docs/guide.md#asynchronous-tasks). |
+| Site crawling | [Bound traversal and read cursor batches](docs/guide.md#site-crawling). |
+| Deferred content | [Read and cache content references](docs/guide.md#content-and-references). |
+| Request options | [Rendering, actions, filtering, cookies and proxy country](docs/guide.md#request-options). |
 
-## Quick Start
+## Installation
 
-See [example.go](./example/example.go) for a complete list of usage examples.
+Requires Go 1.20+. Use a [maintained Go release](https://go.dev/doc/devel/release#policy) in production.
+
+For a new application, run this once in its directory. Skip it if the project already has `go.mod`:
+
+```sh
+go mod init example.com/crawl-example
+```
+
+Install the SDK in your application module:
+
+```sh
+go get github.com/nstdata-ai/crawl-go@v1.0.0
+```
+
+When upgrading from `v0.1.1`, review the [changes](CHANGELOG.md#v100), including explicit `OnlyMainContent` serialization.
+
+## Quick start
+
+Set your API key in the environment (macOS/Linux):
+
+```sh
+export NSTDATA_API_TOKEN='your-api-key'
+```
+
+Save the following as `main.go`. It submits one scrape task and prints Markdown; service calls consume credits.
 
 ```go
 package main
@@ -31,27 +48,48 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/nstdata-ai/crawl-go"
 	"log"
+	"os"
+	"time"
+
+	crawl "github.com/nstdata-ai/crawl-go"
 )
 
 func main() {
-	// Initialize the client with your API token
-	client := crawl.NewClient("YOUR_API_TOKEN")
-	
-	// Submit a basic scraping task
-	res, err := client.SubmitScrapeTaskSync(context.Background(), &crawl.ScrapeRequestDto{
-		URL:     "https://example.com/",
-		Formats: []string{crawl.FormatMarkdown},
-		Timeout: 60000,
+	token := os.Getenv("NSTDATA_API_TOKEN")
+	if token == "" {
+		log.Fatal("Set NSTDATA_API_TOKEN in your environment.")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	client := crawl.NewClient(token)
+	result, err := client.SubmitScrapeTaskSync(ctx, &crawl.ScrapeRequestDto{
+		URL: "https://example.com/", Formats: []string{crawl.FormatMarkdown},
+		OnlyMainContent: true,
 	})
-	
 	if err != nil {
 		log.Fatal(err)
 	}
-	
-	// Output the resulting markdown
-	md, _ := res.Data.GetMarkdown(context.Background())
-	fmt.Println(md)
+	if result.Status != crawl.StatusCompleted || !result.Success || result.Data == nil {
+		log.Fatal("task did not return successful completed content")
+	}
+	text, err := result.Data.GetMarkdown(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(text)
+	if result.Data.Truncated != nil && *result.Data.Truncated {
+		log.Print("content is truncated")
+	}
 }
 ```
+
+Run it from the same application module:
+
+```sh
+go run .
+```
+
+Missing content returns `ErrContentUnavailable`; present empty content succeeds. For complete task flows, method inputs/results and error handling, see the [usage guide](docs/guide.md).
+
+[API documentation](https://docs.nstdata.io/docs/crawl) · [Contributing](CONTRIBUTING.md) · [MIT license](LICENSE)

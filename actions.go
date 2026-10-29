@@ -17,7 +17,7 @@ func WaitAction(milliseconds float64) ActionDto {
 }
 
 // WaitSelectorAction waits until the element matched by selector is visible.
-// timeoutMs <= 0 means use the server default.
+// Zero timeoutMs omits the optional field.
 func WaitSelectorAction(selector string, timeoutMs float64) ActionDto {
 	return ActionDto{Type: ActionTypeWaitSelector, Selector: selector, Milliseconds: timeoutMs}
 }
@@ -63,7 +63,7 @@ func ElementScreenshotAction(selector string) ActionDto {
 }
 
 // WaitForRequestAction waits for a network response whose URL matches
-// urlPattern (supports * wildcard). timeoutMs <= 0 means use the server default.
+// urlPattern. The service interprets the pattern; zero timeoutMs omits the optional field.
 func WaitForRequestAction(urlPattern string, timeoutMs float64) ActionDto {
 	return ActionDto{Type: ActionTypeWaitForRequestCompletion, UrlPattern: urlPattern, Milliseconds: timeoutMs}
 }

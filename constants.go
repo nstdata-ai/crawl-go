@@ -21,6 +21,7 @@ const (
 	StatusProcessing = "processing"
 	StatusCompleted  = "completed"
 	StatusFailed     = "failed"
+	StatusExpired    = "expired"
 	// StatusScraping means a crawl session is still fetching pages.
 	StatusScraping = "scraping"
 )
@@ -47,6 +48,6 @@ const (
 	// page, ParticularScreenshot for a specific element, otherwise the viewport.
 	ActionTypeScreenshot = "screenshot"
 	// ActionTypeWaitForRequestCompletion waits for a matching network response.
-	// Requires UrlPattern (supports * wildcard); Milliseconds optional.
+	// Requires UrlPattern, interpreted by the service; Milliseconds optional.
 	ActionTypeWaitForRequestCompletion = "waitForRequestCompletion"
 )

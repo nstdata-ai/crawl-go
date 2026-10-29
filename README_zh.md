@@ -1,29 +1,46 @@
-# nstdata crawl SDK (Golang)
+# Nstdata Crawl Go SDK
 
 [English](README.md)
 
-nstdata crawl 的 Golang SDK，提供高级的网页抓取和爬虫服务接口。
+通过 Nstdata Crawl 获取网页内容的 Go 客户端，使用 context 控制本地请求，无第三方运行依赖。
+
+## 功能
+
+| 能力 | 指南 |
+|---|---|
+| 单页抓取 | 读取 Markdown、HTML、链接、PDF、截图或原始字节。 |
+| 异步任务 | [提交一次，按已保存的 ID 接续](docs/guide_zh.md#异步任务)。 |
+| 整站抓取 | [限制遍历范围，按游标读取页面](docs/guide_zh.md#整站抓取)。 |
+| 延迟正文 | [按需读取并缓存内容引用](docs/guide_zh.md#正文与引用)。 |
+| 请求选项 | [渲染、动作、过滤、Cookie 和代理国家](docs/guide_zh.md#请求选项)。 |
 
 ## 安装
 
-```bash
-go get github.com/nstdata-ai/crawl-go
+需要 Go 1.20+。生产环境使用[仍在维护的 Go 版本](https://go.dev/doc/devel/release#policy)。
+
+新项目先在应用目录中初始化一次；已有 `go.mod` 的项目跳过此步：
+
+```sh
+go mod init example.com/crawl-example
 ```
 
-## 功能特性
+在应用的 Go 模块中安装 SDK：
 
-- **基础抓取:** 同步获取页面的 HTML 和 Markdown 格式内容。
-- **截图与 PDF:** 支持整页截图与页面导出为 PDF。
-- **浏览器动作编排:** 支持等待元素、表单填充、点击、滚动以及执行自定义 JavaScript。
-- **自定义配置:** 携带 Cookie、自定义请求头、模拟移动端等。
-- **正文提取与过滤:** 自动提取高质量文章正文，去除广告、导航栏和页脚。
-- **代理位置:** 通过 `Proxy.Country` 指定代理出口国家。
-- **同步或异步抓取:** 使用同一个抓取接口；异步提交返回任务 ID，可继续轮询结果。
-- **批量抓取 (Crawl):** 按深度、最大页数等条件遍历站点。
+```sh
+go get github.com/nstdata-ai/crawl-go@v1.0.0
+```
+
+从 `v0.1.1` 升级请阅读[变更记录](CHANGELOG.md#v100)，包括 `OnlyMainContent` 的显式序列化变化。
 
 ## 快速开始
 
-您可以参考 [example.go](./example/example.go) 了解所有场景的完整使用示例。
+在环境中设置 API Key（macOS/Linux）：
+
+```sh
+export NSTDATA_API_TOKEN='your-api-key'
+```
+
+将以下程序保存为 `main.go`。它提交一次单页任务并输出 Markdown；服务调用会消耗额度。
 
 ```go
 package main
@@ -31,27 +48,48 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/nstdata-ai/crawl-go"
 	"log"
+	"os"
+	"time"
+
+	crawl "github.com/nstdata-ai/crawl-go"
 )
 
 func main() {
-	// 使用您的 API Token 初始化客户端
-	client := crawl.NewClient("YOUR_API_TOKEN")
-	
-	// 提交基础的抓取任务
-	res, err := client.SubmitScrapeTaskSync(context.Background(), &crawl.ScrapeRequestDto{
-		URL:     "https://example.com/",
-		Formats: []string{crawl.FormatMarkdown},
-		Timeout: 60000,
+	token := os.Getenv("NSTDATA_API_TOKEN")
+	if token == "" {
+		log.Fatal("Set NSTDATA_API_TOKEN in your environment.")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	client := crawl.NewClient(token)
+	result, err := client.SubmitScrapeTaskSync(ctx, &crawl.ScrapeRequestDto{
+		URL: "https://example.com/", Formats: []string{crawl.FormatMarkdown},
+		OnlyMainContent: true,
 	})
-	
 	if err != nil {
 		log.Fatal(err)
 	}
-	
-	// 输出抓取到的 Markdown 内容
-	md, _ := res.Data.GetMarkdown(context.Background())
-	fmt.Println(md)
+	if result.Status != crawl.StatusCompleted || !result.Success || result.Data == nil {
+		log.Fatal("task did not return successful completed content")
+	}
+	text, err := result.Data.GetMarkdown(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(text)
+	if result.Data.Truncated != nil && *result.Data.Truncated {
+		log.Print("content is truncated")
+	}
 }
 ```
+
+在同一个应用模块中运行：
+
+```sh
+go run .
+```
+
+缺失正文返回 `ErrContentUnavailable`；存在但为空的正文读取成功。完整任务流程、方法输入／结果及失败处理见[使用指南](docs/guide_zh.md)。
+
+[API 文档](https://docs.nstdata.io/docs/crawl) · [贡献说明](CONTRIBUTING.md) · [MIT 许可](LICENSE)

@@ -1,8 +1,13 @@
 package crawl
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"sync"
+	"unicode/utf8"
 )
 
 type ScrapeRequestDto struct {
@@ -12,13 +17,13 @@ type ScrapeRequestDto struct {
 	ExcludeTags     []string          `json:"excludeTags,omitempty"`     // HTML tags to remove entirely (e.g., ["nav", "footer"])
 	Formats         []string          `json:"formats,omitempty"`         // Desired output formats (e.g., ["markdown", "html", "links"])
 	Headers         map[string]string `json:"headers,omitempty"`         // Custom HTTP headers
-	IncludeTags     []string          `json:"includeTags,omitempty"`     // Tags to keep. WARNING: strips all other tags (keeping text), which may break markdown
+	IncludeTags     []string          `json:"includeTags,omitempty"`     // Included tags; extraction behavior is service-defined
 	JsRender        *JsRenderDto      `json:"jsRender,omitempty"`        // JavaScript rendering instructions
 	Mobile          bool              `json:"mobile,omitempty"`          // Whether to emulate a mobile device
-	OnlyMainContent bool              `json:"onlyMainContent,omitempty"` // Automatically extract main article content and remove noise
+	OnlyMainContent bool              `json:"onlyMainContent"`           // Always sent; true requests main-content filtering.
 	RemoveSelectors []string          `json:"removeSelectors,omitempty"` // CSS selectors for elements to remove (e.g., [".ads", "#popup"])
 	TargetSelector  string            `json:"targetSelector,omitempty"`  // CSS selector to restrict extraction to a specific element
-	Timeout         float64           `json:"timeout,omitempty"`         // Request timeout in milliseconds
+	Timeout         float64           `json:"timeout,omitempty"`         // Optional integer milliseconds, 1000–60000; zero omits the setting
 }
 
 // CrawlRequestDto extends the scrape options with crawl traversal controls
@@ -28,20 +33,20 @@ type CrawlRequestDto struct {
 	Cookies         []CookieDto       `json:"cookies,omitempty"`         // Optional cookies to include in the request
 	Proxy           *ProxyDto         `json:"proxy,omitempty"`           // Proxy settings, such as exit country
 	ExcludeTags     []string          `json:"excludeTags,omitempty"`     // HTML tags to remove entirely
-	ExcludeUrls     []string          `json:"excludeUrls,omitempty"`     // Regex patterns to exclude specific URLs from crawling
+	ExcludeUrls     []string          `json:"excludeUrls,omitempty"`     // Native URL filters; interpreted by the service
 	Formats         []string          `json:"formats,omitempty"`         // Desired output formats (e.g., ["markdown", "html"])
 	Headers         map[string]string `json:"headers,omitempty"`         // Custom HTTP headers
 	IgnoreQuery     bool              `json:"ignoreQuery,omitempty"`     // Whether to ignore URL query parameters for deduplication
-	IncludeTags     []string          `json:"includeTags,omitempty"`     // Tags to keep. WARNING: strips all other tags
-	IncludeUrls     []string          `json:"includeUrls,omitempty"`     // Regex patterns to only crawl matching URLs
+	IncludeTags     []string          `json:"includeTags,omitempty"`     // Included tags; extraction behavior is service-defined
+	IncludeUrls     []string          `json:"includeUrls,omitempty"`     // Native URL filters; interpreted by the service
 	JsRender        *JsRenderDto      `json:"jsRender,omitempty"`        // JavaScript rendering instructions
 	MaxDepth        int               `json:"maxDepth,omitempty"`        // Maximum depth of links to follow
 	MaxPages        int               `json:"maxPages,omitempty"`        // Maximum number of pages to crawl
 	Mobile          bool              `json:"mobile,omitempty"`          // Whether to emulate a mobile device
-	OnlyMainContent bool              `json:"onlyMainContent,omitempty"` // Automatically extract main article content
+	OnlyMainContent bool              `json:"onlyMainContent"`           // Always sent; true requests main-content filtering.
 	RemoveSelectors []string          `json:"removeSelectors,omitempty"` // CSS selectors for elements to remove
 	TargetSelector  string            `json:"targetSelector,omitempty"`  // CSS selector to restrict extraction
-	Timeout         float64           `json:"timeout,omitempty"`         // Request timeout in milliseconds
+	Timeout         float64           `json:"timeout,omitempty"`         // Optional integer milliseconds, 1000–60000; zero omits the setting
 }
 
 type CookieDto struct {
@@ -59,7 +64,7 @@ type ProxyDto struct {
 
 type JsRenderDto struct {
 	Actions         []ActionDto `json:"actions,omitempty"`         // List of browser actions to perform
-	WaitFor         float64     `json:"waitFor,omitempty"`         // Global wait time in milliseconds
+	WaitFor         float64     `json:"waitFor,omitempty"`         // Optional integer milliseconds, 1000–30000; zero omits the setting
 	WaitForSelector string      `json:"waitForSelector,omitempty"` // CSS selector to wait for before proceeding
 }
 
@@ -72,7 +77,7 @@ type ActionDto struct {
 	Selector             string  `json:"selector,omitempty"`             // CSS selector for the action target
 	Text                 string  `json:"text,omitempty"`                 // Text to type into an input field
 	Type                 string  `json:"type,omitempty"`                 // Type of action (e.g., "click", "wait", "fill")
-	UrlPattern           string  `json:"urlPattern,omitempty"`           // URL pattern to wait for (regex support)
+	UrlPattern           string  `json:"urlPattern,omitempty"`           // Native network-wait pattern interpreted by the service
 	WaitSelector         string  `json:"waitSelector,omitempty"`         // CSS selector to wait for
 	X                    float64 `json:"x,omitempty"`                    // X coordinate for scroll/click
 	Y                    float64 `json:"y,omitempty"`                    // Y coordinate for scroll/click
@@ -86,6 +91,7 @@ type SubmitResponseDto struct {
 }
 
 type TaskResultResponseDto struct {
+	Id           string         `json:"id,omitempty"`           // Service ID; synchronous results do not guarantee a queryable task
 	Code         int            `json:"code,omitempty"`         // Custom status code
 	Data         *ScrapeDataDto `json:"data,omitempty"`         // The extracted scrape/crawl data
 	ErrorCode    string         `json:"errorCode,omitempty"`    // Error code identifier if any
@@ -94,115 +100,133 @@ type TaskResultResponseDto struct {
 	Success      bool           `json:"success,omitempty"`      // True if the task executed successfully
 }
 
+// ErrContentUnavailable distinguishes an absent field from a present empty value.
+var ErrContentUnavailable = errors.New("crawl: requested content is unavailable")
+
+// ScrapeDataDto exposes content and opaque storage references. Configure exported fields
+// before concurrent use; getters cache successful reads and return independent byte slices.
 type ScrapeDataDto struct {
-	client *Client
+	client        *Client
+	Links         []string         `json:"links,omitempty"`
+	HtmlRef       string           `json:"htmlRef,omitempty"`
+	MarkdownRef   string           `json:"markdownRef,omitempty"`
+	Metadata      *PageMetadataDto `json:"metadata,omitempty"`
+	PdfRef        string           `json:"pdfRef,omitempty"`
+	RawDataRef    string           `json:"rawDataRef,omitempty"`
+	ScreenshotRef string           `json:"screenshotRef,omitempty"`
+	Truncated     *bool            `json:"truncated,omitempty"`
+	cache         *contentCache
+}
 
-	Links         []string         `json:"links,omitempty"`         // List of extracted hyperlinks
-	HtmlRef       string           `json:"htmlRef,omitempty"`       // Reference link to fetch the HTML content
-	MarkdownRef   string           `json:"markdownRef,omitempty"`   // Reference link to fetch the Markdown content
-	Metadata      *PageMetadataDto `json:"metadata,omitempty"`      // Extracted page metadata and SEO tags
-	PdfRef        string           `json:"pdfRef,omitempty"`        // Reference link to fetch the PDF
-	RawDataRef    string           `json:"rawDataRef,omitempty"`    // Underlying raw response data
-	ScreenshotRef string           `json:"screenshotRef,omitempty"` // Reference link to fetch the screenshot
-
-	html       string
-	markdown   string
-	pdf        []byte
-	rawData    []byte
-	screenshot []byte
+type contentCache struct {
+	mu      sync.Mutex
+	content [5][]byte
+	loaded  [5]bool
 }
 
 func (s *ScrapeDataDto) UnmarshalJSON(data []byte) error {
-	type Alias ScrapeDataDto
-	aux := &struct {
-		Html     string `json:"html,omitempty"`
-		Markdown string `json:"markdown,omitempty"`
-		*Alias
-	}{
-		Alias: (*Alias)(s),
+	type plain ScrapeDataDto
+	var value plain
+	if err := json.Unmarshal(data, &value); err != nil {
+		return errors.New("crawl: invalid content fields")
 	}
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil || fields == nil {
+		return errors.New("crawl: content must be an object")
 	}
-	s.html = aux.Html
-	s.markdown = aux.Markdown
+	var content [5][]byte
+	var loaded [5]bool
+	for i, key := range []string{"html", "markdown", "pdf", "rawData", "screenshot"} {
+		raw, ok := fields[key]
+		if !ok || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			continue
+		}
+		var text string
+		if json.Unmarshal(raw, &text) != nil {
+			return errors.New("crawl: inline content must be a string")
+		}
+		content[i] = []byte(text)
+		if i == 2 || i == 4 {
+			// Reject malformed encodings instead of returning silently corrupted binary data.
+			if bytes.ContainsAny([]byte(text), "\r\n") {
+				return errors.New("crawl: invalid inline Base64")
+			}
+			decoded, err := base64.StdEncoding.Strict().DecodeString(text)
+			if err != nil {
+				return errors.New("crawl: invalid inline Base64")
+			}
+			content[i] = decoded
+		}
+		loaded[i] = true
+	}
+	if raw, ok := fields["links"]; ok && !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		var links []json.RawMessage
+		if json.Unmarshal(raw, &links) != nil {
+			return errors.New("crawl: links must be strings")
+		}
+		for _, link := range links {
+			if len(bytes.TrimSpace(link)) == 0 || bytes.TrimSpace(link)[0] != '"' {
+				return errors.New("crawl: links must be strings")
+			}
+		}
+	}
+	s.Links = value.Links
+	s.HtmlRef = value.HtmlRef
+	s.MarkdownRef = value.MarkdownRef
+	s.Metadata = value.Metadata
+	s.PdfRef = value.PdfRef
+	s.RawDataRef = value.RawDataRef
+	s.ScreenshotRef = value.ScreenshotRef
+	s.Truncated = value.Truncated
+	s.cache = &contentCache{content: content, loaded: loaded}
+	s.client = nil
 	return nil
 }
 
+func (s *ScrapeDataDto) get(ctx context.Context, index int) ([]byte, error) {
+	if s == nil || ctx == nil || s.cache == nil {
+		return nil, ErrContentUnavailable
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	s.cache.mu.Lock()
+	if s.cache.loaded[index] {
+		value := append([]byte{}, s.cache.content[index]...)
+		s.cache.mu.Unlock()
+		return value, nil
+	}
+	refs := [5]string{s.HtmlRef, s.MarkdownRef, s.PdfRef, s.RawDataRef, s.ScreenshotRef}
+	ref, client := refs[index], s.client
+	s.cache.mu.Unlock()
+	if ref == "" || client == nil {
+		return nil, ErrContentUnavailable
+	}
+	value, err := client.ReadStorage(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	if (index == 0 || index == 1) && !utf8.Valid(value) {
+		return nil, errors.New("crawl: text content must be valid UTF-8")
+	}
+	s.cache.mu.Lock()
+	s.cache.content[index] = append([]byte{}, value...)
+	s.cache.loaded[index] = true
+	s.cache.mu.Unlock()
+	return value, nil
+}
+
 func (s *ScrapeDataDto) GetHtml(ctx context.Context) (string, error) {
-	if s.html != "" {
-		return s.html, nil
-	}
-	if s.HtmlRef != "" && s.client != nil {
-		bs, err := s.client.ReadStorage(ctx, s.HtmlRef)
-		if err != nil {
-			return "", err
-		}
-		s.html = string(bs)
-		return s.html, nil
-	}
-	return "", nil
+	value, err := s.get(ctx, 0)
+	return string(value), err
 }
-
 func (s *ScrapeDataDto) GetMarkdown(ctx context.Context) (string, error) {
-	if s.markdown != "" {
-		return s.markdown, nil
-	}
-	if s.MarkdownRef != "" && s.client != nil {
-		bs, err := s.client.ReadStorage(ctx, s.MarkdownRef)
-		if err != nil {
-			return "", err
-		}
-		s.markdown = string(bs)
-		return s.markdown, nil
-	}
-	return "", nil
+	value, err := s.get(ctx, 1)
+	return string(value), err
 }
-
-func (s *ScrapeDataDto) GetPdf(ctx context.Context) ([]byte, error) {
-	if len(s.pdf) > 0 {
-		return s.pdf, nil
-	}
-	if s.PdfRef != "" && s.client != nil {
-		bs, err := s.client.ReadStorage(ctx, s.PdfRef)
-		if err != nil {
-			return nil, err
-		}
-		s.pdf = bs
-		return s.pdf, nil
-	}
-	return nil, nil
-}
-
-func (s *ScrapeDataDto) GetRawData(ctx context.Context) ([]byte, error) {
-	if len(s.rawData) > 0 {
-		return s.rawData, nil
-	}
-	if s.RawDataRef != "" && s.client != nil {
-		bs, err := s.client.ReadStorage(ctx, s.RawDataRef)
-		if err != nil {
-			return nil, err
-		}
-		s.rawData = bs
-		return s.rawData, nil
-	}
-	return nil, nil
-}
-
-func (s *ScrapeDataDto) GetScreenshot(ctx context.Context) ([]byte, error) {
-	if len(s.screenshot) > 0 {
-		return s.screenshot, nil
-	}
-	if s.ScreenshotRef != "" && s.client != nil {
-		bs, err := s.client.ReadStorage(ctx, s.ScreenshotRef)
-		if err != nil {
-			return nil, err
-		}
-		s.screenshot = bs
-		return s.screenshot, nil
-	}
-	return nil, nil
-}
+func (s *ScrapeDataDto) GetPdf(ctx context.Context) ([]byte, error)        { return s.get(ctx, 2) }
+func (s *ScrapeDataDto) GetRawData(ctx context.Context) ([]byte, error)    { return s.get(ctx, 3) }
+func (s *ScrapeDataDto) GetScreenshot(ctx context.Context) ([]byte, error) { return s.get(ctx, 4) }
 
 type PageMetadataDto struct {
 	Canonical   string `json:"canonical,omitempty"`   // Canonical URL of the page
@@ -211,6 +235,46 @@ type PageMetadataDto struct {
 	OgImage     string `json:"ogImage,omitempty"`     // OpenGraph preview image URL
 	StatusCode  int    `json:"statusCode,omitempty"`  // HTTP response status code
 	Title       string `json:"title,omitempty"`       // Page title
+	// AdditionalFields preserves service metadata not represented by the typed fields.
+	AdditionalFields map[string]json.RawMessage `json:"-"`
+}
+
+func (m *PageMetadataDto) UnmarshalJSON(data []byte) error {
+	type plain PageMetadataDto
+	var value plain
+	if json.Unmarshal(data, &value) != nil {
+		return errors.New("crawl: invalid page metadata")
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(data, &fields) != nil || fields == nil {
+		return errors.New("crawl: page metadata must be an object")
+	}
+	for _, key := range []string{"canonical", "description", "language", "ogImage", "statusCode", "title"} {
+		delete(fields, key)
+	}
+	value.AdditionalFields = fields
+	*m = PageMetadataDto(value)
+	return nil
+}
+
+func (m PageMetadataDto) MarshalJSON() ([]byte, error) {
+	type plain PageMetadataDto
+	data, err := json.Marshal(plain(m))
+	if err != nil {
+		return nil, err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return nil, err
+	}
+	for key, value := range m.AdditionalFields {
+		switch key {
+		case "canonical", "description", "language", "ogImage", "statusCode", "title":
+			continue
+		}
+		fields[key] = value
+	}
+	return json.Marshal(fields)
 }
 
 // CrawlStatusResponseDto is the aggregate progress of a crawl session.
