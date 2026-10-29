@@ -42,6 +42,9 @@ func TestMalformedContentIsRejected(t *testing.T) {
 		`[]`, `null`, `{"markdown":false}`, `{"html":{}}`, `{"pdf":"not base64"}`,
 		`{"screenshot":"AQI"}`, `{"links":[null]}`, `{"links":[123]}`,
 		`{"markdownRef":5}`, `{"metadata":{"title":3}}`, `{"truncated":"false"}`,
+		`{"rawData":"\ud800"}`, `{"html":"\udc00"}`, `{"markdown":"private-\ud800suffix"}`,
+		`{"rawData":"\ud800\u0041"}`, `{"rawData":"\ud800\\udc00"}`,
+		`{"rawData":"` + string([]byte{0xff}) + `"}`,
 	} {
 		t.Run(body, func(t *testing.T) {
 			var value crawl.ScrapeDataDto
@@ -49,6 +52,43 @@ func TestMalformedContentIsRejected(t *testing.T) {
 				t.Error("invalid content accepted")
 			}
 		})
+	}
+}
+
+func TestInlineTextUnicodeIsPreserved(t *testing.T) {
+	for _, field := range []string{"html", "markdown", "rawData"} {
+		for _, tc := range []struct{ name, encoded, want string }{
+			{"literal", `"雪😀�"`, "雪😀�"},
+			{"surrogate-pair", `"\ud83d\ude00"`, "😀"},
+			{"uppercase-pair", `"\uD83D\uDE00"`, "😀"},
+			{"replacement-character", `"\ufffd"`, "�"},
+			{"escaped-backslash", `"\\ud800"`, `\ud800`},
+			{"unicode-backslash", `"\u005cuD800"`, `\uD800`},
+			{"escaped-slash", `"a\/b"`, "a/b"},
+		} {
+			t.Run(field+"/"+tc.name, func(t *testing.T) {
+				var value crawl.ScrapeDataDto
+				if err := json.Unmarshal([]byte(`{"`+field+`":`+tc.encoded+`}`), &value); err != nil {
+					t.Fatal(err)
+				}
+				ctx := context.Background()
+				var text string
+				var err error
+				switch field {
+				case "html":
+					text, err = value.GetHtml(ctx)
+				case "markdown":
+					text, err = value.GetMarkdown(ctx)
+				case "rawData":
+					var raw []byte
+					raw, err = value.GetRawData(ctx)
+					text = string(raw)
+				}
+				if err != nil || text != tc.want {
+					t.Fatalf("content changed: %q %v, want %q", text, err, tc.want)
+				}
+			})
+		}
 	}
 }
 

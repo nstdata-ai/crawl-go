@@ -97,7 +97,7 @@ getter 优先使用内联内容，包括存在但为空的值；否则通过同�
 
 成功结果会缓存。失败读取，包括非法 UTF-8 的 HTML／Markdown，不缓存；调用方再次调用 getter 才会发起新尝试。首次并发读取可能各自下载同一引用。复制结果 DTO 会共享已初始化的缓存；返回的字节切片是独立副本。
 
-`ReadStorage` 和二进制 getter 保留任意原始字节。JSON 内联 PDF／截图按 Base64 解码；原始数据不代表结构化 JSON 抽取。API JSON 和文本引用必须是有效 UTF-8。
+`ReadStorage` 和二进制 getter 保留任意原始字节。JSON 内联 PDF／截图按 Base64 解码；原始数据不代表结构化 JSON 抽取。API JSON 和文本引用必须是有效 UTF-8。内联文本中的无效 Unicode 转义会返回错误，不会静默替换字符。
 
 向下游传递正文时保留 `Id`／`TaskId`、`Url`、状态／成功标志、`Metadata` 和 `Truncated`。`Truncated == nil` 表示未知；true 表示服务已截断。已知 metadata 字段有类型，`AdditionalFields` 以 `json.RawMessage` 保留未知字段。既有标量字段对缺失／null 使用 Go 零值，不单独保留字段是否存在。
 

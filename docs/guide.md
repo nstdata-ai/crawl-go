@@ -97,7 +97,7 @@ Getters prefer inline content, including present empty values; otherwise they re
 
 Successful reads are cached. Failed reads, including invalid UTF-8 HTML/Markdown, are not cached; another getter call is a new explicit attempt. Concurrent initial reads may each download the same reference. Copied result DTOs share their initialized cache; returned byte slices are independent copies.
 
-`ReadStorage` and binary getters preserve arbitrary bytes. PDF/screenshots embedded in JSON are Base64-decoded; raw data does not imply structured JSON extraction. API JSON and text reference reads require valid UTF-8.
+`ReadStorage` and binary getters preserve arbitrary bytes. PDF/screenshots embedded in JSON are Base64-decoded; raw data does not imply structured JSON extraction. API JSON and text reference reads require valid UTF-8. Invalid Unicode escapes in inline text are rejected instead of replaced.
 
 Keep `Id`/`TaskId`, `Url`, status/success, `Metadata` and `Truncated` with downstream content. `Truncated == nil` means unknown; true denotes service truncation. Known metadata fields are typed; `AdditionalFields` retains unknown fields as `json.RawMessage`. Legacy scalar fields use Go zero values for missing/null values; they do not preserve presence separately.
 

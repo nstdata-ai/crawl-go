@@ -338,32 +338,39 @@ func TestExactResponseLimitAndNilHTTPClient(t *testing.T) {
 
 var _ io.ReadCloser = (*failedBody)(nil)
 
-func TestInvalidUTF8APIResponsesAreRejected(t *testing.T) {
+func TestInvalidUnicodeAPIResponsesAreRejected(t *testing.T) {
 	for _, operation := range []string{"sync", "query", "pages"} {
-		t.Run(operation, func(t *testing.T) {
-			calls := 0
-			client := crawl.NewClient("fixture-key")
-			client.HTTPClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
-				calls++
-				payload := `{"data":{"markdown":"private-` + string([]byte{0xff}) + `"}}`
-				if operation == "pages" {
-					payload = `{"data":[` + payload + `]}`
+		for _, tc := range []struct{ name, content string }{
+			{"invalid-utf8", `{"markdown":"private-` + string([]byte{0xff}) + `"}`},
+			{"raw-high-surrogate", `{"rawData":"private-\ud800"}`},
+			{"html-low-surrogate", `{"html":"private-\udc00"}`},
+			{"markdown-broken-pair", `{"markdown":"private-\ud800suffix"}`},
+		} {
+			t.Run(operation+"/"+tc.name, func(t *testing.T) {
+				calls := 0
+				client := crawl.NewClient("fixture-key")
+				client.HTTPClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+					calls++
+					payload := `{"data":` + tc.content + `}`
+					if operation == "pages" {
+						payload = `{"data":[` + payload + `]}`
+					}
+					return response(`{"code":200,"err":false,"data":` + payload + `}`), nil
+				})}
+				var err error
+				switch operation {
+				case "sync":
+					_, err = client.SubmitScrapeTaskSync(context.Background(), &crawl.ScrapeRequestDto{URL: "https://target.invalid/", Formats: []string{"markdown", "html", "rawData"}})
+				case "query":
+					_, err = client.GetScrapeTaskResult(context.Background(), "existing")
+				case "pages":
+					_, err = client.ListCrawlPages(context.Background(), "existing", crawl.ListCrawlPagesOptions{})
 				}
-				return response(`{"code":200,"err":false,"data":` + payload + `}`), nil
-			})}
-			var err error
-			switch operation {
-			case "sync":
-				_, err = client.SubmitScrapeTaskSync(context.Background(), &crawl.ScrapeRequestDto{URL: "https://target.invalid/", Formats: []string{"markdown"}})
-			case "query":
-				_, err = client.GetScrapeTaskResult(context.Background(), "existing")
-			case "pages":
-				_, err = client.ListCrawlPages(context.Background(), "existing", crawl.ListCrawlPagesOptions{})
-			}
-			if err == nil || strings.Contains(err.Error(), "private-") || calls != 1 {
-				t.Fatalf("invalid UTF-8: err=%v calls=%d", err, calls)
-			}
-		})
+				if err == nil || strings.Contains(err.Error(), "private-") || calls != 1 {
+					t.Fatalf("invalid Unicode: err=%v calls=%d", err, calls)
+				}
+			})
+		}
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"sync"
 	"unicode/utf8"
 )
@@ -124,6 +125,39 @@ type contentCache struct {
 	loaded  [5]bool
 }
 
+// raw is a JSON string already accepted by encoding/json, which replaces unpaired surrogates.
+func validInlineUnicode(raw []byte) bool {
+	if !utf8.Valid(raw) {
+		return false
+	}
+	for i := 0; i < len(raw); i++ {
+		if raw[i] != '\\' {
+			continue
+		}
+		i++
+		if raw[i] != 'u' {
+			continue
+		}
+		code, _ := strconv.ParseUint(string(raw[i+1:i+5]), 16, 16)
+		i += 4
+		if code >= 0xdc00 && code <= 0xdfff {
+			return false
+		}
+		if code < 0xd800 || code > 0xdbff {
+			continue
+		}
+		if i+6 >= len(raw) || raw[i+1] != '\\' || raw[i+2] != 'u' {
+			return false
+		}
+		low, _ := strconv.ParseUint(string(raw[i+3:i+7]), 16, 16)
+		if low < 0xdc00 || low > 0xdfff {
+			return false
+		}
+		i += 6
+	}
+	return true
+}
+
 func (s *ScrapeDataDto) UnmarshalJSON(data []byte) error {
 	type plain ScrapeDataDto
 	var value plain
@@ -144,6 +178,9 @@ func (s *ScrapeDataDto) UnmarshalJSON(data []byte) error {
 		var text string
 		if json.Unmarshal(raw, &text) != nil {
 			return errors.New("crawl: inline content must be a string")
+		}
+		if !validInlineUnicode(raw) {
+			return errors.New("crawl: inline text must contain valid Unicode")
 		}
 		content[i] = []byte(text)
 		if i == 2 || i == 4 {
