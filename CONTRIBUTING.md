@@ -39,6 +39,14 @@ go run ./example submit-crawl https://your-authorized-site.example/
 go run ./example resume-crawl SAVED_CRAWL_ID
 ```
 
+To continue after the page-batch limit, pass the returned cursor as a third argument:
+
+```sh
+go run ./example resume-crawl SAVED_CRAWL_ID 'RETURNED_AFTER_CURSOR'
+```
+
+The optional cursor is forwarded unchanged; omission starts at the first batch. Preserve prior output separately. The limit error reports the next cursor in quoted form; pass its original value as one shell-quoted argument, without evaluating it as a command. A failure while reading or writing a batch can leave partial output; the cursor does not track progress within that batch.
+
 These are independent alternatives. Submission can incur charges. Store the returned ID before continuing; do not resubmit after an uncertain outcome. The example caps status queries at 20, page batches at 100 and total waiting at two minutes. Site submission sets maxPages=2/maxDepth=1; native discovery can return fewer pages. Keep IDs, references, private content and local credentials out of published fixtures.
 
 ## Publishing

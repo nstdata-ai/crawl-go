@@ -101,7 +101,7 @@ func TestPageOutputFailureStopsAndPreservesCause(t *testing.T) {
 	client.BaseURL = server.URL
 	failure := errors.New("fixture output failure")
 	writer := &failFirstWriter{err: failure}
-	err := printPages(context.Background(), client, "existing", writer)
+	err := printPages(context.Background(), client, "existing", writer, "")
 	if !errors.Is(err, failure) || writer.calls != 1 {
 		t.Fatalf("output failure: %v writes=%d", err, writer.calls)
 	}
@@ -125,8 +125,90 @@ func TestPageCancellationStopsWithoutFailedPageOutput(t *testing.T) {
 	client := crawl.NewClient("fixture-key")
 	client.BaseURL = server.URL
 	var out bytes.Buffer
-	err := printPages(ctx, client, "existing", &out)
+	err := printPages(ctx, client, "existing", &out, "")
 	if !errors.Is(err, context.Canceled) || out.Len() != 0 || calls != 2 {
 		t.Fatalf("page cancellation: %v output=%q calls=%d", err, out.String(), calls)
+	}
+}
+
+func TestResumeCrawlContinuesAfterPaginationLimit(t *testing.T) {
+	pages, statuses := 0, 0
+	resumed := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("unexpected method %s", r.Method)
+		}
+		if !strings.HasSuffix(r.URL.Path, "/pages") {
+			statuses++
+			fmt.Fprint(w, `{"code":200,"err":false,"data":{"status":"completed"}}`)
+			return
+		}
+		pages++
+		expected := ""
+		if pages > 1 {
+			expected = fmt.Sprintf("cursor-%d", pages-1)
+		}
+		if got := r.URL.Query().Get("after_cursor"); got != expected {
+			t.Errorf("cursor=%q want %q", got, expected)
+		}
+		if resumed {
+			fmt.Fprint(w, `{"code":200,"err":false,"data":{"data":[{"status":"completed","success":true,"data":{"markdown":"恢复正文"}}]}}`)
+		} else {
+			fmt.Fprintf(w, `{"code":200,"err":false,"data":{"data":[],"nextCursor":"cursor-%d"}}`, pages)
+		}
+	}))
+	defer server.Close()
+	client := crawl.NewClient("fixture-key")
+	client.BaseURL = server.URL
+	var out bytes.Buffer
+	err := run(context.Background(), client, []string{"resume-crawl", "saved"}, &out)
+	if err == nil || !strings.Contains(err.Error(), `"cursor-100"`) || pages != 100 {
+		t.Fatalf("limit: %v pages=%d", err, pages)
+	}
+	resumed = true
+	out.Reset()
+	err = run(context.Background(), client, []string{"resume-crawl", "saved", "cursor-100"}, &out)
+	if err != nil || !strings.Contains(out.String(), "恢复正文") || pages != 101 || statuses != 2 {
+		t.Fatalf("resume: %v pages=%d statuses=%d output=%q", err, pages, statuses, out.String())
+	}
+}
+
+func TestResumeCrawlRejectsImmediateRepeatedResumeCursor(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if strings.HasSuffix(r.URL.Path, "/pages") {
+			if r.URL.Query().Get("after_cursor") != "saved &雪" {
+				t.Errorf("cursor changed")
+			}
+			fmt.Fprint(w, `{"code":200,"err":false,"data":{"data":[],"nextCursor":"saved &雪"}}`)
+		} else {
+			fmt.Fprint(w, `{"code":200,"err":false,"data":{"status":"completed"}}`)
+		}
+	}))
+	defer server.Close()
+	client := crawl.NewClient("fixture-key")
+	client.BaseURL = server.URL
+	var out bytes.Buffer
+	err := run(context.Background(), client, []string{"resume-crawl", "saved", "saved &雪"}, &out)
+	if err == nil || !strings.Contains(err.Error(), "repeated cursor") || calls != 2 {
+		t.Fatalf("cycle: %v calls=%d", err, calls)
+	}
+}
+
+func TestOptionalCursorOnlyAcceptedForCrawlResumption(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls++; w.WriteHeader(500) }))
+	defer server.Close()
+	client := crawl.NewClient("fixture-key")
+	client.BaseURL = server.URL
+	for _, args := range [][]string{{"resume-crawl", "saved", ""}, {"scrape", "https://example.com/", "cursor"}, {"resume-scrape", "saved", "cursor"}, {"submit-crawl", "https://example.com/", "cursor"}, {"resume-crawl", "saved", "cursor", "extra"}} {
+		var out bytes.Buffer
+		if err := run(context.Background(), client, args, &out); err == nil {
+			t.Fatalf("accepted invalid arguments %q", args)
+		}
+	}
+	if calls != 0 {
+		t.Fatalf("invalid args caused %d requests", calls)
 	}
 }

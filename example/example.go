@@ -24,8 +24,8 @@ func main() {
 }
 
 func run(ctx context.Context, client *crawl.Client, args []string, out io.Writer) error {
-	if len(args) != 2 {
-		return errors.New("usage: example scrape|submit-scrape|submit-crawl URL, or resume-scrape|resume-crawl TASK_ID")
+	if len(args) != 2 && !(len(args) == 3 && args[0] == "resume-crawl" && args[2] != "") {
+		return errors.New("usage: example scrape|submit-scrape|submit-crawl URL, resume-scrape TASK_ID, or resume-crawl CRAWL_ID [AFTER_CURSOR]")
 	}
 	switch args[0] {
 	case "scrape":
@@ -81,7 +81,11 @@ func run(ctx context.Context, client *crawl.Client, args []string, out io.Writer
 				if _, err := fmt.Fprintf(out, "status=%s completed=%d failed=%d pending=%d\n", status.Status, status.Completed, status.Failed, status.Pending); err != nil {
 					return err
 				}
-				err = printPages(ctx, client, args[1], out)
+				cursor := ""
+				if len(args) == 3 {
+					cursor = args[2]
+				}
+				err = printPages(ctx, client, args[1], out, cursor)
 				if err != nil {
 					return err
 				}
@@ -133,9 +137,8 @@ func printContent(ctx context.Context, result *crawl.TaskResultResponseDto, out 
 	return nil
 }
 
-func printPages(ctx context.Context, client *crawl.Client, id string, out io.Writer) error {
-	cursor := ""
-	seen := map[string]bool{}
+func printPages(ctx context.Context, client *crawl.Client, id string, out io.Writer, cursor string) error {
+	seen := map[string]bool{cursor: true}
 	failed := false
 	for batch := 0; batch < 100; batch++ {
 		pages, err := client.ListCrawlPages(ctx, id, crawl.ListCrawlPagesOptions{AfterCursor: cursor, Limit: 20})
@@ -165,5 +168,5 @@ func printPages(ctx context.Context, client *crawl.Client, id string, out io.Wri
 		seen[pages.NextCursor] = true
 		cursor = pages.NextCursor
 	}
-	return errors.New("pagination limit reached; keep the crawl ID and last cursor")
+	return fmt.Errorf("pagination limit reached; keep the crawl ID and resume after cursor %q", cursor)
 }
