@@ -14,7 +14,6 @@ import (
 )
 
 const reviewed = "0123456789012345678901234567890123456789"
-const checksum = "h1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
 type transport func(*http.Request) (*http.Response, error)
 
@@ -30,14 +29,11 @@ type fixture struct {
 	posts       int
 	postStatus  int
 	postBody    string
-	directHash  string
-	proxySum    string
-	corruptFile bool
 }
 
 func newFixture(t *testing.T) (release, *fixture) {
 	t.Helper()
-	f := &fixture{t: t, postStatus: 201, directHash: reviewed, proxySum: checksum,
+	f := &fixture{t: t, postStatus: 201,
 		settings: newSettings(),
 		policies: `{"total_count":1,"branch_policies":[{"name":"main","type":"branch"}]}`}
 	root := t.TempDir()
@@ -70,54 +66,7 @@ func newFixture(t *testing.T) (release, *fixture) {
 				return []byte("client.go\x00go.mod\x00README.md\x00README_zh.md\x00CHANGELOG.md\x00"), nil
 			}
 		}
-		if name != filepath.Join(runtime.GOROOT(), "bin", "go") {
-			t.Fatal("unexpected command")
-		}
-		values := map[string]string{}
-		for _, value := range env {
-			key, value, _ := strings.Cut(value, "=")
-			values[key] = value
-		}
-		for key, want := range map[string]string{"GOENV": "off", "GOWORK": "off", "GOTOOLCHAIN": "local", "GOSUMDB": "sum.golang.org", "GOPRIVATE": "", "GONOPROXY": "", "GONOSUMDB": "", "GIT_CONFIG_NOSYSTEM": "1"} {
-			if values[key] != want {
-				t.Fatalf("non-isolated Go option %s", key)
-			}
-		}
-		for key := range values {
-			if strings.HasPrefix(key, "NSTDATA_") || key == "GH_TOKEN" || key == "GITHUB_TOKEN" {
-				t.Fatal("credential entered public download environment")
-			}
-		}
-		if len(args) == 4 && args[0] == "mod" && args[1] == "download" {
-			cache := filepath.Join(dir, "modcache", "module")
-			if err := os.MkdirAll(cache, 0700); err != nil {
-				t.Fatal(err)
-			}
-			for _, file := range []string{"client.go", "go.mod", "README.md", "README_zh.md", "CHANGELOG.md"} {
-				body, err := os.ReadFile(filepath.Join(root, file))
-				if err != nil {
-					t.Fatal(err)
-				}
-				if f.corruptFile && values["GOPROXY"] != "direct" && file == "client.go" {
-					body = []byte("different")
-				}
-				if err := os.WriteFile(filepath.Join(cache, file), body, 0600); err != nil {
-					t.Fatal(err)
-				}
-			}
-			result := downloaded{Path: modulePath, Version: "v1.0.0", Dir: cache, Sum: checksum, GoModSum: checksum}
-			if values["GOPROXY"] == "direct" {
-				result.Origin.VCS, result.Origin.URL, result.Origin.Hash = "git", "https://github.com/"+repository, f.directHash
-			} else {
-				result.Sum = f.proxySum
-			}
-			return json.Marshal(result)
-		}
-		if len(args) == 3 && args[0] == "mod" && args[1] == "init" ||
-			len(args) == 2 && args[0] == "get" && args[1] == modulePath+"@v1.0.0" || args[0] == "build" {
-			return nil, nil
-		}
-		t.Fatalf("unexpected Go arguments %v", args)
+		t.Fatalf("unexpected command %s %v", name, args)
 		return nil, nil
 	}
 	return r, f
@@ -242,6 +191,38 @@ func TestTagCreationUsesOneExactRequestAndConfirmsReference(t *testing.T) {
 	}
 }
 
+func TestReleaseWorkflowFinishesAfterTagConfirmation(t *testing.T) {
+	workflow, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "release.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, f := newFixture(t)
+	run := r.run
+	r.run = func(ctx context.Context, dir, name string, args, env []string) ([]byte, error) {
+		if name != "git" {
+			t.Fatal("release workflow must not install or download the published module")
+		}
+		return run(ctx, dir, name, args, env)
+	}
+	var modes []string
+	for _, line := range strings.Split(string(workflow), "\n") {
+		const prefix = "- run: go run ./internal/release "
+		if mode, ok := strings.CutPrefix(strings.TrimSpace(line), prefix); ok {
+			modes = append(modes, mode)
+			if err := r.perform(context.Background(), mode); err != nil {
+				t.Fatalf("workflow %s: %v", mode, err)
+			}
+		}
+	}
+	if strings.Join(modes, ",") != "check,tag" || f.posts != 1 {
+		t.Fatalf("workflow modes=%v, tag attempts=%d", modes, f.posts)
+	}
+	last := f.apiCalls[len(f.apiCalls)-1]
+	if last.Method != http.MethodGet || !strings.HasSuffix(last.URL.Path, "/git/ref/tags/v1.0.0") {
+		t.Fatal("release did not finish with the created tag confirmation")
+	}
+}
+
 func TestFailedTagCreationStopsWithoutRetryOrProviderData(t *testing.T) {
 	for _, status := range []int{403, 422, 500} {
 		r, f := newFixture(t)
@@ -249,35 +230,6 @@ func TestFailedTagCreationStopsWithoutRetryOrProviderData(t *testing.T) {
 		err := r.perform(context.Background(), "tag")
 		if err == nil || f.posts != 1 || strings.Contains(err.Error(), "fixture-private-response") {
 			t.Fatalf("failed creation: %v attempts=%d", err, f.posts)
-		}
-	}
-}
-
-func TestPublicVerificationChecksOriginHashesBytesAndDefaultGet(t *testing.T) {
-	r, f := newFixture(t)
-	f.existingTag = true
-	if err := r.perform(context.Background(), "verify"); err != nil {
-		t.Fatal(err)
-	}
-	gets := 0
-	for _, args := range f.commands {
-		if len(args) == 3 && args[1] == "get" && args[2] == modulePath+"@v1.0.0" {
-			gets++
-		}
-	}
-	if gets != 1 || f.posts != 0 {
-		t.Fatal("public verification must use one standard go get and no writes")
-	}
-	for _, change := range []func(*fixture){
-		func(f *fixture) { f.directHash = "" },
-		func(f *fixture) { f.proxySum = "h1:different" },
-		func(f *fixture) { f.corruptFile = true },
-	} {
-		r, f := newFixture(t)
-		f.existingTag = true
-		change(f)
-		if err := r.perform(context.Background(), "verify"); err == nil {
-			t.Fatal("mismatched public module passed")
 		}
 	}
 }

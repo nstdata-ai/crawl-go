@@ -39,12 +39,20 @@ go run ./example submit-crawl https://your-authorized-site.example/
 go run ./example resume-crawl SAVED_CRAWL_ID
 ```
 
+To continue after the page-batch limit, pass the returned cursor as a third argument:
+
+```sh
+go run ./example resume-crawl SAVED_CRAWL_ID 'RETURNED_AFTER_CURSOR'
+```
+
+The optional cursor is forwarded unchanged; omission starts at the first batch. Preserve prior output separately. The limit error reports the next cursor in quoted form; pass its original value as one shell-quoted argument, without evaluating it as a command. A failure while reading or writing a batch can leave partial output; the cursor does not track progress within that batch.
+
 These are independent alternatives. Submission can incur charges. Store the returned ID before continuing; do not resubmit after an uncertain outcome. The example caps status queries at 20, page batches at 100 and total waiting at two minutes. Site submission sets maxPages=2/maxDepth=1; native discovery can return fewer pages. Keep IDs, references, private content and local credentials out of published fixtures.
 
 ## Publishing
 
-Use the manually dispatched `Publish Go module` workflow from `main`, supplying the stable version tag and full reviewed commit SHA. After CI and approval in `go-production`, it creates that tag at the reviewed commit and verifies public module installation. The workflow does not move or replace an existing tag.
+Use the manually dispatched `Publish Go module` workflow from `main`, supplying the stable version tag and full reviewed commit SHA. After CI and approval in `go-production`, it creates that tag at the reviewed commit and confirms the GitHub reference. The workflow does not move or replace an existing tag.
 
 Configure `go-production` with required reviewers, administrator bypass disabled and only the `main` branch allowed. The tag job uses the workflow's automatic GitHub token with `contents: write`; Go modules do not require a separate package-registry token.
 
-Public verification compares the source commit, Go module checksums and installed source bytes. Compressed ZIP bytes and module-info timestamps can differ between distribution paths. Check failures against the actual tag and public module state before another run; never force-push a released tag. Tag creation and publication require explicit authorization.
+The workflow finishes after confirming the tag, without waiting for public module availability or running `go get`. Verify public installation separately against the reviewed source commit, module checksums and installed source bytes. Compressed ZIP bytes and module-info timestamps can differ between distribution paths. Check failures against the actual tag and public module state before another run; never force-push a released tag. Tag creation and publication require explicit authorization.

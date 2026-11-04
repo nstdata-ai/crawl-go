@@ -13,7 +13,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"time"
 )
@@ -197,122 +196,12 @@ func (r release) ref(ctx context.Context, path, want string, absent bool) error 
 	return nil
 }
 
-type downloaded struct {
-	Path, Version, Dir, Sum, GoModSum string
-	Origin                            struct{ VCS, URL, Hash string }
-}
-
-func goEnvironment(folder, config, proxy string) []string {
-	return append(hostEnvironment(), "GOENV=off", "GOWORK=off", "GOTOOLCHAIN=local", "GOFLAGS=",
-		"GOPATH="+filepath.Join(folder, "gopath"), "GOMODCACHE="+filepath.Join(folder, "modcache"),
-		"GOCACHE="+filepath.Join(folder, "buildcache"), "GOPROXY="+proxy, "GOSUMDB=sum.golang.org",
-		"GOPRIVATE=", "GONOPROXY=", "GONOSUMDB=", "GOINSECURE=", "GIT_TERMINAL_PROMPT=0",
-		"GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+config, "NETRC="+os.DevNull)
-}
-
-func (r release) download(ctx context.Context, folder string, env []string) (downloaded, error) {
-	var result downloaded
-	output, err := r.run(ctx, folder, filepath.Join(runtime.GOROOT(), "bin", "go"),
-		[]string{"mod", "download", "-json", modulePath + "@" + r.version}, env)
-	if err != nil {
-		return result, err
-	}
-	if json.Unmarshal(output, &result) != nil || result.Path != modulePath ||
-		result.Version != r.version || result.Dir == "" || !strings.HasPrefix(result.Sum, "h1:") ||
-		!strings.HasPrefix(result.GoModSum, "h1:") {
-		return result, errors.New("invalid public module download metadata")
-	}
-	relative, err := filepath.Rel(filepath.Join(folder, "modcache"), result.Dir)
-	if err != nil || filepath.IsAbs(relative) || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		return result, errors.New("module download escaped its isolated cache")
-	}
-	return result, nil
-}
-
-func (r release) verify(ctx context.Context) error {
-	if err := r.ref(ctx, "tags/"+r.version, r.commit, false); err != nil {
-		return err
-	}
-	folder, err := os.MkdirTemp("", "nstdata-go-public-install-")
-	if err != nil {
-		return errors.New("cannot create isolated installation directory")
-	}
-	defer os.RemoveAll(folder)
-	config := filepath.Join(folder, "gitconfig")
-	if err := os.WriteFile(config, []byte("[credential]\n helper =\n"), 0600); err != nil {
-		return errors.New("cannot create isolated Git configuration")
-	}
-	directDir, proxyDir := filepath.Join(folder, "direct"), filepath.Join(folder, "proxy")
-	for _, dir := range []string{directDir, proxyDir} {
-		if err := os.Mkdir(dir, 0700); err != nil {
-			return errors.New("cannot create isolated consumer directory")
-		}
-	}
-	direct, err := r.download(ctx, directDir, goEnvironment(directDir, config, "direct"))
-	if err != nil {
-		return err
-	}
-	if direct.Origin.VCS != "git" || direct.Origin.Hash != r.commit ||
-		(direct.Origin.URL != "https://github.com/"+repository && direct.Origin.URL != "https://github.com/"+repository+".git") {
-		return errors.New("direct module origin does not identify the reviewed commit")
-	}
-	goBin := filepath.Join(runtime.GOROOT(), "bin", "go")
-	env := goEnvironment(proxyDir, config, "https://proxy.golang.org,direct")
-	if _, err := r.run(ctx, proxyDir, goBin, []string{"mod", "init", "example.com/crawl-release-check"}, env); err != nil {
-		return err
-	}
-	// source has already matched this literal command against both READMEs.
-	if _, err := r.run(ctx, proxyDir, goBin, []string{"get", modulePath + "@" + r.version}, env); err != nil {
-		return err
-	}
-	installed, err := r.download(ctx, proxyDir, env)
-	if err != nil {
-		return err
-	}
-	if direct.Sum != installed.Sum || direct.GoModSum != installed.GoModSum {
-		return errors.New("public module checksums differ between source and default installation")
-	}
-	tracked, err := r.run(ctx, r.root, "git", []string{"ls-files", "-z"}, hostEnvironment())
-	if err != nil {
-		return err
-	}
-	for _, name := range strings.Split(strings.TrimSuffix(string(tracked), "\x00"), "\x00") {
-		if name != "go.mod" && name != "LICENSE" && !strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, ".md") {
-			continue
-		}
-		expected, err := os.ReadFile(filepath.Join(r.root, name))
-		if err != nil {
-			return errors.New("cannot read reviewed source")
-		}
-		for _, dir := range []string{direct.Dir, installed.Dir} {
-			actual, err := os.ReadFile(filepath.Join(dir, name))
-			if err != nil || !bytes.Equal(expected, actual) {
-				return errors.New("installed module source differs from the reviewed commit")
-			}
-		}
-	}
-	readme, err := os.ReadFile(filepath.Join(r.root, "README.md"))
-	if err != nil {
-		return errors.New("cannot read the documented program")
-	}
-	program := regexp.MustCompile("(?s)```go\\n(.*?)\\n```").FindSubmatch(readme)
-	if len(program) != 2 || os.WriteFile(filepath.Join(proxyDir, "main.go"), program[1], 0600) != nil {
-		return errors.New("cannot prepare the documented consumer program")
-	}
-	_, err = r.run(ctx, proxyDir, goBin,
-		[]string{"build", "-mod=readonly", "-o", filepath.Join(proxyDir, "consumer"), "."}, env)
-	return err
-}
-
 func (r release) perform(ctx context.Context, mode string) error {
-	if mode != "check" && mode != "tag" && mode != "verify" {
-		return errors.New("use check, tag or verify")
+	if mode != "check" && mode != "tag" {
+		return errors.New("use check or tag")
 	}
 	if err := r.source(ctx); err != nil {
 		return err
-	}
-	if mode == "verify" {
-		return r.verify(ctx)
 	}
 	if err := r.environment(ctx); err != nil {
 		return err

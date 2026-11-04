@@ -2,6 +2,8 @@
 
 ## v1.0.0
 
+- Allow the executable crawl example to resume from an explicit page cursor and report the next cursor at its batch limit.
+
 - Use the Nstdata API origin by default; add configurable API origin and per-response byte limit.
 - Validate nil requests, integer timing/action fields, task IDs, cursor options and API envelopes.
 - Preserve context cancellation, close responses, refuse redirects and omit sensitive bodies/URLs from errors.
